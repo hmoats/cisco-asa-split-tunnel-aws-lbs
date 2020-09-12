@@ -1,0 +1,60 @@
+---
+#################################################################################### 
+# Cisco_ASA_Split_Tunnel_AWS_LBs playbook 
+# 
+# Run "aws elb|elbv2 describe-load-balancers" to create a list to update Cisco ASA
+# object-group for interesting traffic for remote access VPN. 
+#
+# Usage: 
+#
+# hmoats
+#################################################################################### 
+- name: Cisco update ASA object-group VPN-SPLIT-TUNNEL-AWS-LBS with AWS LB IPs
+  connection: local
+  hosts: fws
+  vars:
+    # to decrypt the vars. 
+    env_aws_access_key_id: !vault |
+          # ansible-vault encrypt_string
+    env_aws_secret_access_key: !vault |
+          # ansible-vault encrypt_string
+    # Cisco authentication
+    cli:
+      host: "{{ inventory_hostname }}"
+      username: !vault |
+          # ansible-vault encrypt_string
+      password: !vault |
+          # ansible-vault encrypt_string
+      authorize: no
+
+  tasks:
+    ################################################################################
+    # AWS Env
+    ################################################################################
+    - name: Collect AWS_Env elbv2 IPs from us-west-2 
+      register: EnvElbv2Ips
+      shell: "aws elbv2 describe-load-balancers --region us-west-2 --query 'LoadBalancers[?Scheme==`internet-facing`].{ARN:DNSName}' --output text | xargs -r dig +short"
+      environment:
+        AWS_ACCESS_KEY_ID: "{{ env_aws_access_key_id }}"
+        AWS_SECRET_ACCESS_KEY: "{{ env_aws_secret_access_key }}"
+
+    - name: Update VPN-SPLIT-TUNNEL-AWS-LBS object-group with AWS_Env elbv2 IPs from us-west-2
+      with_items: "{{ EnvElbv2Ips.stdout_lines }}"
+      asa_config:
+        lines: "network-object host {{ item }}"
+        parents: ['object-group network VPN-SPLIT-TUNNEL-AWS-LBS']
+        provider: "{{ cli }}"
+
+    - name: Collect AWS_Env elb IPs from us-west-2
+      register: EnvElbIps
+      shell: "aws elb describe-load-balancers --region us-west-2 --query 'LoadBalancerDescriptions[?Scheme==`internet-facing`].{ARN:DNSName}' --output text | xargs -r +short"
+      environment:
+        AWS_ACCESS_KEY_ID: "{{ env_aws_access_key_id }}"
+        AWS_SECRET_ACCESS_KEY: "{{ env_aws_secret_access_key }}"
+
+    - name: Update VPN-SPLIT-TUNNEL-AWS-LBS object-group with AWS_Env elb IPs from us-west-2
+      with_items: "{{ EnvElbIps.stdout_lines }}"
+      asa_config:
+        lines: "network-object host {{ item }}"
+        parents: ['object-group network VPN-SPLIT-TUNNEL-AWS-LBS']
+        provider: "{{ cli }}"
